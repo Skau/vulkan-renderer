@@ -121,7 +121,18 @@ void Device::prepare_queues(bool prefer_distinct_transfer_queue) {
     }
 }
 
-Device::Device(bool prefer_distinct_transer_queue, const std::optional<std::uint32_t> preferred_physical_device_index) : graphics_card(graphics_card) {
+Device::Device(const VkInstance &instance, const VkSurfaceKHR &surface, bool enable_vulkan_debug_markers, bool prefer_distinct_transer_queue,
+               const std::optional<std::uint32_t> preferred_physical_device_index)
+    : graphics_card(graphics_card), surface(surface) {
+
+    std::optional<VkPhysicalDevice> selected_graphics_card =
+        settings_decision_maker.decide_which_graphics_card_to_use(instance, surface, preferred_physical_device_index);
+
+    if (!selected_graphics_card.has_value()) {
+        throw std::runtime_error("Error: Could not find suitable graphics card!");
+    }
+
+    graphics_card = selected_graphics_card.value();
 
     prepare_queues(true);
 
@@ -131,9 +142,12 @@ Device::Device(bool prefer_distinct_transer_queue, const std::optional<std::uint
     };
 
 #ifndef NDEBUG
-    // Debug markers allow the assignment of internal names to Vulkan resources.
-    // These internal names will conveniently be visible in debuggers like RenderDoc.
-    device_extensions_wishlist.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
+    if (enable_vulkan_debug_markers) {
+        // Debug markers allow the assignment of internal names to Vulkan resources.
+        // These internal names will conveniently be visible in debuggers like RenderDoc.
+        // Debug markers are only available if RenderDoc is enabled.
+        device_extensions_wishlist.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
+    }
 #endif
 
     std::vector<const char *> enabled_device_extensions;

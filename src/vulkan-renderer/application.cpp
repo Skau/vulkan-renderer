@@ -99,6 +99,9 @@ VkResult Application::load_toml_configuration_file(const std::string &file_name)
 }
 
 VkResult Application::load_textures() {
+    auto device = vkdevice->get_device();
+    auto selected_graphics_card = vkdevice->get_physical_device();
+
     assert(device);
     assert(selected_graphics_card);
     assert(debug_marker_manager);
@@ -111,14 +114,16 @@ VkResult Application::load_textures() {
     std::string texture_name = "unnamed texture";
 
     for (const auto &texture_file : texture_files) {
-        textures.emplace_back(device, selected_graphics_card, vma_allocator, texture_file, texture_name, gpu_queue_manager->get_graphics_queue(),
-                              gpu_queue_manager->get_graphics_family_index().value());
+        textures.emplace_back(device, selected_graphics_card, vma_allocator, texture_file, texture_name, vkdevice->get_graphics_queue(),
+                              vkdevice->get_graphics_queue_family_index());
     }
 
     return VK_SUCCESS;
 }
 
 VkResult Application::load_shaders() {
+    auto device = vkdevice->get_device();
+
     assert(device);
 
     spdlog::debug("Loading vertex shaders.");
@@ -159,9 +164,11 @@ VkResult Application::load_shaders() {
 /// TODO: Refactor rendering method!
 /// TODO: Finish present call using transfer queue.
 VkResult Application::render_frame() {
+    auto device = vkdevice->get_device();
+
     assert(device);
-    assert(gpu_queue_manager->get_graphics_queue());
-    assert(gpu_queue_manager->get_present_queue());
+    assert(vkdevice->get_graphics_queue());
+    assert(vkdevice->get_present_queue());
 
     vkWaitForFences(device, 1, &(*in_flight_fences[current_frame]), VK_TRUE, UINT64_MAX);
 
@@ -208,7 +215,7 @@ VkResult Application::render_frame() {
 
     vkResetFences(device, 1, &*in_flight_fences[current_frame]);
 
-    result = vkQueueSubmit(gpu_queue_manager->get_graphics_queue(), 1, &submit_info, *in_flight_fences[current_frame]);
+    result = vkQueueSubmit(vkdevice->get_graphics_queue(), 1, &submit_info, *in_flight_fences[current_frame]);
     if (result != VK_SUCCESS) {
         return result;
     }
@@ -222,7 +229,7 @@ VkResult Application::render_frame() {
     present_info.pImageIndices = &image_index;
     present_info.pResults = nullptr;
 
-    result = vkQueuePresentKHR(gpu_queue_manager->get_present_queue(), &present_info);
+    result = vkQueuePresentKHR(vkdevice->get_present_queue(), &present_info);
 
     // Some notes on frame_buffer_resized:
     // It is important to do this after vkQueuePresentKHR to ensure that the semaphores are
@@ -280,8 +287,10 @@ VkResult Application::load_octree_geometry() {
 
     const std::string octree_mesh_name = "unnamed octree";
 
+    auto device = vkdevice->get_device();
+
     // Create a mesh buffer for octree vertex geometry.
-    mesh_buffers.emplace_back(device, gpu_queue_manager->get_data_transfer_queue(), gpu_queue_manager->get_data_transfer_queue_family_index().value(),
+    mesh_buffers.emplace_back(device, vkdevice->get_transfer_queue(), vkdevice->get_transfer_queue_family_index(),
                               vma_allocator, octree_mesh_name, sizeof(OctreeVertex), octree_vertices.size(), octree_vertices.data());
 
     return VK_SUCCESS;
@@ -301,6 +310,8 @@ VkResult Application::load_models() {
 }
 
 VkResult Application::check_application_specific_features() {
+    auto selected_graphics_card = vkdevice->get_physical_device();
+
     assert(selected_graphics_card);
 
     VkPhysicalDeviceFeatures graphics_card_features;
@@ -455,20 +466,6 @@ VkResult Application::init() {
         spdlog::debug("Preferential graphics card index {} specified.", prefered_graphics_card.value());
     }
 
-    // Let's see if there is a graphics card that is suitable for us.
-    std::optional<VkPhysicalDevice> graphics_card_candidate =
-        settings_decision_maker->decide_which_graphics_card_to_use(vkinstance->get_instance(), surface, prefered_graphics_card);
-
-    // Check if we found a graphics card candidate.
-    if (graphics_card_candidate.has_value()) {
-        selected_graphics_card = graphics_card_candidate.value();
-    } else {
-        // No graphics card suitable!
-        std::string error_message = "Error: Could not find any suitable GPU!";
-        display_fatal_error_message(error_message);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     bool display_graphics_card_info = true;
 
     spdlog::debug("Checking for -nostats command line argument.");
@@ -522,12 +519,6 @@ VkResult Application::init() {
         use_distinct_data_transfer_queue = false;
     }
 
-    result = gpu_queue_manager->init(settings_decision_maker);
-    vulkan_error_check(result);
-
-    result = gpu_queue_manager->prepare_queues(selected_graphics_card, surface, use_distinct_data_transfer_queue);
-    vulkan_error_check(result);
-
     spdlog::debug("Checking for -no_vk_debug_markers command line argument.");
 
     bool enable_debug_marker_device_extension = true;
@@ -546,8 +537,7 @@ VkResult Application::init() {
         enable_debug_marker_device_extension = false;
     }
 
-    result = create_physical_device(selected_graphics_card, enable_debug_marker_device_extension);
-    vulkan_error_check(result);
+    vkdevice = std::make_unique<wrapper::Device>(vkinstance->get_instance(), surface, enable_debug_marker_device_extension, use_distinct_data_transfer_queue);
 
     result = check_application_specific_features();
     vulkan_error_check(result);
@@ -557,9 +547,6 @@ VkResult Application::init() {
     vulkan_error_check(result);
 
     result = create_vma_allocator();
-    vulkan_error_check(result);
-
-    result = gpu_queue_manager->setup_queues(device);
     vulkan_error_check(result);
 
     result = create_swapchain();
@@ -608,6 +595,8 @@ VkResult Application::init() {
 
     result = record_command_buffers();
     vulkan_error_check(result);
+
+    auto device = vkdevice->get_device();
 
     result = fence_manager->init(device, debug_marker_manager);
     vulkan_error_check(result);

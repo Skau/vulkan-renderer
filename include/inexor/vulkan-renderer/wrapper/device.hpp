@@ -50,13 +50,10 @@ public:
     Device &operator=(const Device &) = delete;
     Device &operator=(Device &&) noexcept = default;
 
-    /// @brief Default constructor.
-    /// This will call the other constructor by passing std::nullopt as preferred graphics card index.
-    Device();
-
     /// @brief Creates a graphics card interface.
     /// @param preferred_gpu_index [in] The index of the preferred physical device to use.
-    Device(bool prefer_distinct_transer_queue = true, const std::optional<std::uint32_t> preferred_physical_device_index = std::nullopt);
+    Device(const VkInstance &instance, const VkSurfaceKHR &surface, bool enable_vulkan_debug_markers, bool prefer_distinct_transer_queue,
+           const std::optional<std::uint32_t> preferred_physical_device_index = std::nullopt);
 
     // TODO: Add overloaded constructors for VkPhysicalDeviceFeatures and requested device extensions in the future!
 

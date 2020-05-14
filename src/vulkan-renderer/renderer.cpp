@@ -29,66 +29,9 @@ VkResult VulkanRenderer::create_window_surface(const VkInstance &instance, GLFWw
     return glfwCreateWindowSurface(instance, window, nullptr, &surface);
 }
 
-VkResult VulkanRenderer::create_physical_device(const VkPhysicalDevice &graphics_card, const bool enable_debug_markers) {
-    assert(graphics_card);
-
-    spdlog::debug("Creating physical device (graphics card interface).");
-
-    VkPhysicalDeviceFeatures used_features = {};
-
-    // Enable anisotropic filtering.
-    used_features.samplerAnisotropy = VK_TRUE;
-
-    // Our wishlist of device extensions that we would like to enable.
-    std::vector<const char *> device_extensions_wishlist = {
-        // Since we actually want a window to draw on, we need this swapchain extension.
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    };
-
-    if (enable_debug_markers) {
-        // Debug markers are only present if RenderDoc is enabled.
-        device_extensions_wishlist.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
-    }
-
-    // The actual list of enabled device extensions.
-    std::vector<const char *> enabled_device_extensions;
-
-    for (auto device_extension_name : device_extensions_wishlist) {
-        if (availability_checks_manager->has_device_extension(graphics_card, device_extension_name)) {
-            spdlog::debug("Device extension '{}' is supported!", device_extension_name);
-
-            // This device layer is supported!
-            // Add it to the list of enabled device layers.
-            enabled_device_extensions.push_back(device_extension_name);
-        } else {
-            // This device layer is not supported!
-            std::string error_message = "Device extension '" + std::string(device_extension_name) + " not supported!";
-            display_error_message(error_message);
-        }
-    }
-
-    VkDeviceCreateInfo device_create_info = {};
-
-    auto queues_to_create = gpu_queue_manager->get_queues_to_create();
-
-    device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    device_create_info.pNext = nullptr;
-    device_create_info.flags = 0;
-    device_create_info.queueCreateInfoCount = static_cast<std::uint32_t>(queues_to_create.size());
-    device_create_info.pQueueCreateInfos = queues_to_create.data();
-    device_create_info.enabledLayerCount = 0;
-    device_create_info.ppEnabledLayerNames = nullptr;
-    device_create_info.enabledExtensionCount = static_cast<std::uint32_t>(enabled_device_extensions.size());
-    device_create_info.ppEnabledExtensionNames = enabled_device_extensions.data();
-    device_create_info.pEnabledFeatures = &used_features;
-
-    VkResult result = vkCreateDevice(graphics_card, &device_create_info, nullptr, &device);
-    vulkan_error_check(result);
-
-    return VK_SUCCESS;
-}
-
 VkResult VulkanRenderer::initialise_debug_marker_manager(const bool enable_debug_markers) {
+    auto device = vkdevice->get_device();
+    auto selected_graphics_card = vkdevice->get_physical_device();
     assert(device);
     assert(selected_graphics_card);
 
@@ -107,9 +50,9 @@ VkResult VulkanRenderer::initialise_debug_marker_manager(const bool enable_debug
 }
 
 VkResult VulkanRenderer::create_command_pool() {
+    auto device = vkdevice->get_device();
     assert(device);
     assert(debug_marker_manager);
-    assert(gpu_queue_manager->get_graphics_family_index().has_value());
 
     spdlog::debug("Creating command pool for rendering.");
 
@@ -118,7 +61,7 @@ VkResult VulkanRenderer::create_command_pool() {
     command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     command_pool_create_info.pNext = nullptr;
     command_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    command_pool_create_info.queueFamilyIndex = gpu_queue_manager->get_graphics_family_index().value();
+    command_pool_create_info.queueFamilyIndex = vkdevice->get_graphics_queue_family_index();
 
     VkResult result = vkCreateCommandPool(device, &command_pool_create_info, nullptr, &command_pool);
     vulkan_error_check(result);
@@ -130,12 +73,16 @@ VkResult VulkanRenderer::create_command_pool() {
 }
 
 VkResult VulkanRenderer::create_uniform_buffers() {
+    auto device = vkdevice->get_device();
     uniform_buffers.emplace_back(device, vma_allocator, std::string("matrices uniform buffer"), sizeof(UniformBufferObject));
 
     return VK_SUCCESS;
 }
 
 VkResult VulkanRenderer::create_depth_buffer() {
+    auto device = vkdevice->get_device();
+    auto selected_graphics_card = vkdevice->get_physical_device();
+
     VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
 
     VkFormatFeatureFlags format = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -209,6 +156,9 @@ VkResult VulkanRenderer::create_depth_buffer() {
 }
 
 VkResult VulkanRenderer::create_command_buffers() {
+    auto device = vkdevice->get_device();
+    auto selected_graphics_card = vkdevice->get_physical_device();
+
     assert(device);
     assert(debug_marker_manager);
     assert(number_of_images_in_swapchain > 0);
@@ -241,6 +191,9 @@ VkResult VulkanRenderer::create_command_buffers() {
 }
 
 VkResult VulkanRenderer::create_vma_allocator() {
+    auto device = vkdevice->get_device();
+    auto selected_graphics_card = vkdevice->get_physical_device();
+
     assert(device);
     assert(selected_graphics_card);
     assert(debug_marker_manager);
@@ -429,6 +382,9 @@ VkResult VulkanRenderer::create_synchronisation_objects() {
 }
 
 VkResult VulkanRenderer::create_swapchain() {
+    auto device = vkdevice->get_device();
+    auto selected_graphics_card = vkdevice->get_physical_device();
+
     assert(device);
     assert(surface);
     assert(selected_graphics_card);
@@ -583,6 +539,8 @@ VkResult VulkanRenderer::create_swapchain() {
 }
 
 VkResult VulkanRenderer::cleanup_swapchain() {
+    auto device = vkdevice->get_device();
+
     spdlog::debug("Cleaning up swapchain.");
 
     spdlog::debug("Waiting for device to be idle.");
@@ -744,6 +702,8 @@ VkResult VulkanRenderer::update_cameras() {
 }
 
 VkResult VulkanRenderer::recreate_swapchain() {
+    auto device = vkdevice->get_device();
+
     assert(device);
 
     vkDeviceWaitIdle(device);
@@ -875,6 +835,8 @@ VkResult VulkanRenderer::recreate_swapchain() {
 
 VkResult VulkanRenderer::create_descriptor_pool() {
 
+    auto device = vkdevice->get_device();
+
     descriptors.emplace_back(device, number_of_images_in_swapchain, std::string("unnamed descriptor"));
 
     // Create the descriptor pool.
@@ -945,6 +907,8 @@ VkResult VulkanRenderer::create_descriptor_writes() {
 
 VkResult VulkanRenderer::create_pipeline() {
     // TODO: VulkanPipelineManager!
+    auto device = vkdevice->get_device();
+
     assert(device);
     assert(debug_marker_manager);
 
@@ -1368,6 +1332,8 @@ VkResult VulkanRenderer::create_pipeline() {
 }
 
 VkResult VulkanRenderer::create_frame_buffers() {
+    auto device = vkdevice->get_device();
+
     assert(device);
     assert(window_width > 0);
     assert(window_height > 0);
@@ -1640,6 +1606,9 @@ VkResult VulkanRenderer::calculate_memory_budget() {
 }
 
 VkResult VulkanRenderer::shutdown_vulkan() {
+    auto device = vkdevice->get_device();
+    auto selected_graphics_card = vkdevice->get_physical_device();
+
     // It is important to destroy the objects in reversal of the order of creation.
     spdlog::debug("------------------------------------------------------------------------------------------------------------");
     spdlog::debug("Shutting down Vulkan API.");
@@ -1692,13 +1661,7 @@ VkResult VulkanRenderer::shutdown_vulkan() {
         command_pool = VK_NULL_HANDLE;
     }
 
-    // Device queues are implicitly cleaned up when the device is destroyed,
-    // so we don’t need to do anything in cleanup.
-    spdlog::debug("Destroying Vulkan device.");
-    if (VK_NULL_HANDLE != device) {
-        vkDestroyDevice(device, nullptr);
-        device = VK_NULL_HANDLE;
-    }
+    vkdevice.reset();
 
     // Destroy Vulkan debug callback.
     if (debug_report_callback_initialised) {
@@ -1719,6 +1682,8 @@ VkResult VulkanRenderer::shutdown_vulkan() {
     in_flight_fences.clear();
     image_available_semaphores.clear();
     rendering_finished_semaphores.clear();
+
+    vkinstance.reset();
 
     return VK_SUCCESS;
 }
