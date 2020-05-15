@@ -11,6 +11,7 @@ add_library(
     vulkan-renderer/error_handling.cpp
     vulkan-renderer/fence_manager.cpp
     vulkan-renderer/fps_counter.cpp
+    vulkan-renderer/frame_graph.cpp
     vulkan-renderer/gpu_info.cpp
     vulkan-renderer/gpu_memory_buffer.cpp
     vulkan-renderer/gpu_queue_manager.cpp
